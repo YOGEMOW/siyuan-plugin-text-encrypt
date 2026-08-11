@@ -24,3 +24,20 @@
   pointer-events: none;
   user-select: none;
 }
+
+/* 移动端弹窗操作按钮纵向排列，加大间距 */
+@media (max-width: 768px) {
+  .text-encrypt-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .text-encrypt-actions .fn__space {
+    display: none;
+  }
+  .text-encrypt-actions .b3-button {
+    width: 100%;
+    margin: 0;
+  }
+}

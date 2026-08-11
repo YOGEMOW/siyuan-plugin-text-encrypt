@@ -357,7 +357,7 @@ var index = (() => {
   <input class="b3-text-field fn__block" id="encPwd1" type="password" placeholder="请输入加密密码">
   <input class="b3-text-field fn__block" id="encPwd2" type="password" placeholder="请再次输入密码" style="margin-top:8px;">
 </div>
-<div class="b3-dialog__action">
+<div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="encCancel">取消</button>
   <div class="fn__space"></div>
   <button class="b3-button b3-button--text" id="encOk">加密</button>
@@ -468,7 +468,7 @@ var index = (() => {
   <div class="b3-typography" style="margin-bottom:12px;">输入加密时设置的密码以查看明文。</div>
   <input class="b3-text-field fn__block" id="decPwd" type="password" placeholder="请输入加密密码">
 </div>
-<div class="b3-dialog__action">
+<div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="decCancel">取消</button>
   <div class="fn__space"></div>
   <button class="b3-button b3-button--text" id="decOk">查看</button>
@@ -521,7 +521,7 @@ var index = (() => {
         content: `<div class="b3-dialog__content">
   <textarea class="b3-text-field fn__block" id="decPlain" readonly style="height:220px;">${escapeHtml(plain)}</textarea>
 </div>
-<div class="b3-dialog__action">
+<div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="decClose">关闭</button>
   <div class="fn__space"></div>
   <button class="b3-button b3-button--outline" id="decCopy">复制</button>
