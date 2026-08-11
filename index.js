@@ -561,8 +561,27 @@ var index = (() => {
             if (ops.length > 0) {
               this.transactionUpdate(protyle, ops);
             }
+            const attrRemoves = [];
             for (const t of restored) {
-              await setBlockAttr(t.id, ENCRYPTED_ATTR, "");
+              attrRemoves.push(t.id);
+              const root = this.getWysiwyg(protyle);
+              const el = root ? root.querySelector('div[data-node-id="' + t.id + '"]') : null;
+              if (el) {
+                let p = el.parentElement;
+                while (p && p !== root) {
+                  if (p.dataset && p.dataset.nodeId && p.hasAttribute(ENCRYPTED_ATTR)) {
+                    const ownText = this.getBlockText(p) || "";
+                    if (ownText.includes(PREFIX)) {
+                      break;
+                    }
+                    attrRemoves.push(p.dataset.nodeId);
+                  }
+                  p = p.parentElement;
+                }
+              }
+            }
+            for (const id of Array.from(new Set(attrRemoves))) {
+              await setBlockAttr(id, ENCRYPTED_ATTR, "");
             }
             showMessage("已恢复为明文");
             resultDialog.destroy();
