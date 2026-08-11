@@ -1,5 +1,5 @@
 var index = (() => {
-  const {Plugin, Dialog, showMessage, confirm, fetchSyncPost} = require("siyuan");
+  const {Plugin, Dialog, Menu, showMessage, confirm, fetchSyncPost, getAllEditor, getFrontend} = require("siyuan");
 
   const PREFIX = "enc:v1:";
   const SUPPORTED_TYPES = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"];
@@ -33,6 +33,11 @@ var index = (() => {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function isMobile() {
+    const f = getFrontend();
+    return f === "mobile" || f === "browser-mobile";
   }
 
   async function deriveKey(password, salt) {
@@ -98,10 +103,16 @@ var index = (() => {
 
   const setBlockAttr = (id, name, value) => post("/api/attr/setBlockAttrs", {id, attrs: {[name]: value}});
 
-  class EncryptBlockPlugin extends Plugin {
+  class TextEncryptPlugin extends Plugin {
     onload() {
       this.contentMenuHandler = this.contentMenuHandler.bind(this);
       this.eventBus.on("open-menu-content", this.contentMenuHandler);
+      this.addTopBar({
+        icon: "iconLock",
+        title: "文本加密",
+        position: "right",
+        callback: (event) => this.showTopBarMenu(event),
+      });
       console.log("[text-encrypt] loaded");
     }
 
@@ -139,6 +150,58 @@ var index = (() => {
         type: "submenu",
         submenu,
       });
+    }
+
+    showTopBarMenu(event) {
+      const menu = new Menu("text-encrypt-topbar", () => {});
+      menu.addItem({
+        icon: "iconLock",
+        label: "加密选中文本",
+        click: () => this.encryptCurrentSelection(),
+      });
+      menu.addItem({
+        icon: "iconUnlock",
+        label: "解密查看选中文本",
+        click: () => this.decryptCurrentSelection(),
+      });
+      if (isMobile()) {
+        menu.fullscreen();
+      } else if (event && event.clientX !== undefined) {
+        menu.open({x: event.clientX, y: event.clientY});
+      } else {
+        menu.fullscreen();
+      }
+    }
+
+    getActiveProtyle() {
+      const editors = getAllEditor();
+      return editors && editors.length > 0 ? editors[0] : null;
+    }
+
+    getCurrentRange() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) {
+        return null;
+      }
+      return sel.getRangeAt(0);
+    }
+
+    encryptCurrentSelection() {
+      const range = this.getCurrentRange();
+      if (!range) {
+        showMessage("请先选中要加密的文本", 3000, "error");
+        return;
+      }
+      this.encryptSelection(range, this.getActiveProtyle());
+    }
+
+    decryptCurrentSelection() {
+      const range = this.getCurrentRange();
+      if (!range) {
+        showMessage("请先选中要解密的文本", 3000, "error");
+        return;
+      }
+      this.decryptSelection(range, this.getActiveProtyle());
     }
 
     getWysiwyg(protyle) {
@@ -203,8 +266,19 @@ var index = (() => {
       return results;
     }
 
+    // 只取块自身的可编辑文本，避免把子块的文字误当成父块文字
+    getOwnEdit(el) {
+      const edits = el.querySelectorAll('[contenteditable="true"]');
+      for (const edit of edits) {
+        if (edit.closest('[data-node-id]') === el) {
+          return edit;
+        }
+      }
+      return null;
+    }
+
     getBlockText(el) {
-      const edit = el.querySelector('[contenteditable="true"]');
+      const edit = this.getOwnEdit(el);
       if (!edit) {
         return null;
       }
@@ -244,6 +318,31 @@ var index = (() => {
       return true;
     }
 
+    dialogWidth(mobile, desktop) {
+      return isMobile() ? mobile : desktop;
+    }
+
+    copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      return new Promise((resolve, reject) => {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+        document.body.removeChild(ta);
+      });
+    }
+
     async encryptSelection(range, protyle) {
       const blocks = this.getBlocksInRange(range, protyle).filter((b) => SUPPORTED_TYPES.includes(b.type));
       if (blocks.length === 0) {
@@ -263,7 +362,7 @@ var index = (() => {
   <div class="fn__space"></div>
   <button class="b3-button b3-button--text" id="encOk">加密</button>
 </div>`,
-        width: "480px",
+        width: this.dialogWidth("92vw", "480px"),
       });
 
       const input1 = dialog.element.querySelector("#encPwd1");
@@ -331,7 +430,7 @@ var index = (() => {
         return "no-selection";
       }
       const ct = await encryptText(password, textToEncrypt);
-      const edit = element.querySelector('[contenteditable="true"]');
+      const edit = this.getOwnEdit(element);
       if (!edit) {
         return "no-editable";
       }
@@ -374,7 +473,7 @@ var index = (() => {
   <div class="fn__space"></div>
   <button class="b3-button b3-button--text" id="decOk">查看</button>
 </div>`,
-        width: "480px",
+        width: this.dialogWidth("92vw", "480px"),
       });
 
       const pwdInput = dialog.element.querySelector("#decPwd");
@@ -429,13 +528,15 @@ var index = (() => {
   <div class="fn__space"></div>
   <button class="b3-button b3-button--text" id="decRestore">解密并恢复为明文（移除加密）</button>
 </div>`,
-        width: "640px",
+        width: this.dialogWidth("92vw", "640px"),
       });
 
       resultDialog.element.querySelector("#decClose").addEventListener("click", () => resultDialog.destroy());
       resultDialog.element.querySelector("#decCopy").addEventListener("click", () => {
-        navigator.clipboard.writeText(plain).then(() => {
+        this.copyText(plain).then(() => {
           showMessage("已复制明文");
+        }).catch(() => {
+          showMessage("复制失败，请长按文本手动复制", 3000, "error");
         });
       });
       resultDialog.element.querySelector("#decRestore").addEventListener("click", () => {
@@ -450,7 +551,7 @@ var index = (() => {
               const root = this.getWysiwyg(protyle);
               const el = root ? root.querySelector('div[data-node-id="' + t.id + '"]') : null;
               if (el) {
-                const edit = el.querySelector('[contenteditable="true"]');
+                const edit = this.getOwnEdit(el);
                 if (edit) {
                   edit.textContent = newText;
                   ops.push({action: "update", id: t.id, data: el.outerHTML});
@@ -474,6 +575,6 @@ var index = (() => {
     }
   }
 
-  module.exports = {default: EncryptBlockPlugin};
+  module.exports = {default: TextEncryptPlugin};
   return module.exports;
 })();
