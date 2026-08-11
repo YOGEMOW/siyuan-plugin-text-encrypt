@@ -1,0 +1,46 @@
+{
+  "name": "siyuan-plugin-text-encrypt",
+  "author": "YOGEMOW",
+  "url": "https://github.com/YOGEMOW/siyuan-plugin-text-encrypt",
+  "version": "0.1.0",
+  "minAppVersion": "3.0.0",
+  "kernels": [
+    "windows",
+    "linux",
+    "darwin",
+    "docker",
+    "all"
+  ],
+  "backends": [
+    "windows",
+    "linux",
+    "darwin",
+    "docker",
+    "all"
+  ],
+  "frontends": [
+    "desktop",
+    "desktop-window",
+    "browser-desktop",
+    "all"
+  ],
+  "displayName": {
+    "default": "Text Encrypt",
+    "zh_CN": "文本加密"
+  },
+  "description": {
+    "default": "Encrypt selected block text with a password. Encrypted blocks are marked and require the password to view.",
+    "zh_CN": "用密码加密选中的块文本，加密后自动标注，只有输入密码才能查看明文。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README.md"
+  },
+  "keywords": [
+    "encrypt",
+    "加密",
+    "privacy",
+    "安全",
+    "text-encrypt"
+  ]
+}

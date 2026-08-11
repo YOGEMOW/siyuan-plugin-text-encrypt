@@ -1,0 +1,26 @@
+/* 加密块标注样式 */
+.protyle-wysiwyg div[custom-encrypted] {
+  position: relative;
+  background-color: rgba(255, 190, 80, 0.12);
+  border-left: 3px solid rgba(230, 160, 60, 0.75);
+  border-radius: 4px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.9em;
+  color: #9a7b45;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+/* 单个锁图标：位于块左上角外侧，避开文字和右侧操作图标，不重叠 */
+.protyle-wysiwyg div[custom-encrypted]::after {
+  content: "🔒";
+  position: absolute;
+  left: 0;
+  top: -14px;
+  z-index: 1;
+  font-size: 12px;
+  line-height: 16px;
+  opacity: 0.85;
+  pointer-events: none;
+  user-select: none;
+}
