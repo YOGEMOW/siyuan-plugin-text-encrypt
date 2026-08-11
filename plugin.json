@@ -5,25 +5,17 @@
   "version": "0.1.0",
   "minAppVersion": "3.0.0",
   "kernels": [
-    "windows",
-    "linux",
-    "darwin",
-    "docker",
     "all"
   ],
+
   "backends": [
-    "windows",
-    "linux",
-    "darwin",
-    "docker",
     "all"
   ],
+
   "frontends": [
-    "desktop",
-    "desktop-window",
-    "browser-desktop",
     "all"
   ],
+
   "displayName": {
     "default": "Text Encrypt",
     "zh_CN": "文本加密"
