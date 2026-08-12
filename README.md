@@ -6,7 +6,7 @@
 
 GitHub: <https://github.com/YOGEMOW/siyuan-plugin-text-encrypt>
 
-当前版本 v0.1.1，MIT 许可证，要求思源 v3.0.0 及以上。
+当前版本 v0.1.1，MIT 许可证，要求思源 v3.7.0 及以上。
 
 ## 功能
 
