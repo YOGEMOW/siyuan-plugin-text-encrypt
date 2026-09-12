@@ -328,6 +328,15 @@ var index = (() => {
       }
     }
 
+    // 解析可用的编辑器对象：传入的优先，其次按选区查找
+    resolveEditor(range, protyle) {
+      const p = this.unwrapProtyle(protyle);
+      if (p && p.wysiwyg && p.wysiwyg.element && (!range || p.wysiwyg.element.contains(range.startContainer))) {
+        return p;
+      }
+      return this.getProtyleForRange(range) || p || null;
+    }
+
     getCurrentRange() {
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) {
@@ -574,22 +583,69 @@ var index = (() => {
       if (!input) {
         return;
       }
-      const doFocus = () => {
+      const isFocused = () => document.activeElement === input;
+      const attempt = () => {
+        if (isFocused()) {
+          return true;
+        }
         try {
           const active = document.activeElement;
-          if (isMobile() && active && active !== input && typeof active.blur === "function") {
+          if (active && active !== input && typeof active.blur === "function") {
             active.blur();
           }
           input.focus();
+          if (typeof input.setSelectionRange === "function") {
+            try {
+              input.setSelectionRange(input.value.length, input.value.length);
+            } catch (e) {
+              /* 某些输入类型不支持 setSelectionRange */
+            }
+          }
         } catch (e) {
           console.error("[text-encrypt]", e);
         }
+        return isFocused();
       };
-      if (isMobile()) {
-        setTimeout(doFocus, 280);
-      } else {
-        doFocus();
+      // 立即尝试：保留用户手势上下文，移动端键盘更易弹出
+      attempt();
+      if (!isMobile()) {
+        return;
       }
+      // 菜单关闭时编辑器可能抢回焦点，这里多次重试直到聚焦成功
+      [80, 200, 400, 700, 1100].forEach((delay) => setTimeout(() => attempt(), delay));
+    }
+
+    // 弹窗刚打开的一小段时间内防止焦点被编辑器抢走（否则键盘会立刻收起）
+    guardFocus(dialog, input) {
+      if (!isMobile() || !dialog || !dialog.element) {
+        return;
+      }
+      const startedAt = Date.now();
+      const onFocusIn = () => {
+        if (Date.now() - startedAt > 3000) {
+          return;
+        }
+        setTimeout(() => {
+          try {
+            if (!document.body.contains(dialog.element)) {
+              return;
+            }
+            const active = document.activeElement;
+            if (active && dialog.element.contains(active)) {
+              return;
+            }
+            input.focus();
+          } catch (e) {
+            console.error("[text-encrypt]", e);
+          }
+        }, 50);
+      };
+      document.addEventListener("focusin", onFocusIn, true);
+      const origDestroy = dialog.destroy.bind(dialog);
+      dialog.destroy = (...args) => {
+        document.removeEventListener("focusin", onFocusIn, true);
+        return origDestroy(...args);
+      };
     }
 
     bindDialogTapFocus(dialog, inputs) {
@@ -657,7 +713,12 @@ var index = (() => {
     }
 
     async encryptSelection(range, protyle) {
-      const blocks = this.getBlocksInRange(range, protyle).filter((b) => SUPPORTED_TYPES.includes(b.type));
+      const editor = this.resolveEditor(range, protyle);
+      if (!editor) {
+        showMessage("未找到可用的编辑器，请重新打开文档后再试", 4000, "error");
+        return;
+      }
+      const blocks = this.getBlocksInRange(range, editor).filter((b) => SUPPORTED_TYPES.includes(b.type));
       if (blocks.length === 0) {
         showMessage("所选区域没有可加密的文本块", 3000, "error");
         return;
@@ -685,6 +746,7 @@ var index = (() => {
       const cancelBtn = dialog.element.querySelector("#encCancel");
       this.assistKeyboard(dialog);
       this.bindDialogTapFocus(dialog, [input1, input2]);
+      this.guardFocus(dialog, input1);
 
       cancelBtn.addEventListener("click", () => dialog.destroy());
       okBtn.addEventListener("click", async () => {
@@ -703,7 +765,7 @@ var index = (() => {
         try {
           const ordered = blocks.slice().reverse();
           for (const b of ordered) {
-            const r = await this.encryptOneBlock(b, pwd, protyle);
+            const r = await this.encryptOneBlock(b, pwd, editor);
             if (r === "ok") {
               okCount++;
             } else {
@@ -750,6 +812,7 @@ var index = (() => {
       if (!edit) {
         return "no-editable";
       }
+      const originalHTML = edit.innerHTML;
       if (full) {
         edit.textContent = ct;
       } else {
@@ -758,6 +821,9 @@ var index = (() => {
         edit.innerHTML = before + '<span data-type="code">' + escapeHtml(ct) + '</span>' + after;
       }
       if (!this.transactionUpdate(protyle, [{action: "update", id, data: element.outerHTML}])) {
+        // 保存失败时回滚界面，避免出现"看起来加密了但其实没保存"的情况
+        edit.innerHTML = originalHTML;
+        showMessage("保存失败：未找到编辑器上下文，请重试", 4000, "error");
         return "no-protyle";
       }
       await setBlockAttr(id, ENCRYPTED_ATTR, ENCRYPTED_VALUE);
@@ -765,7 +831,8 @@ var index = (() => {
     }
 
     async decryptSelection(range, protyle) {
-      const blocks = this.getBlocksInRange(range, protyle);
+      const editor = this.resolveEditor(range, protyle) || protyle;
+      const blocks = this.getBlocksInRange(range, editor);
       const targets = [];
       for (const b of blocks) {
         const payloads = extractPayloads(b.text || "");
@@ -798,6 +865,7 @@ var index = (() => {
       const cancelBtn = dialog.element.querySelector("#decCancel");
       this.assistKeyboard(dialog);
       this.bindDialogTapFocus(dialog, [pwdInput]);
+      this.guardFocus(dialog, pwdInput);
 
       cancelBtn.addEventListener("click", () => dialog.destroy());
       okBtn.addEventListener("click", async () => {
@@ -828,7 +896,7 @@ var index = (() => {
           })),
         }));
         dialog.destroy();
-        this.showPlainDialog(restored, plainParts.join("\n\n"), protyle);
+        this.showPlainDialog(restored, plainParts.join("\n\n"), editor);
       });
       dialog.bindInput(pwdInput, () => okBtn.click());
       this.focusInput(pwdInput);
