@@ -1,5 +1,5 @@
 var index = (() => {
-  const {Plugin, Dialog, Menu, showMessage, confirm, fetchSyncPost, getAllEditor, getFrontend} = require("siyuan");
+  const {Plugin, Dialog, Menu, showMessage, confirm, fetchSyncPost, getAllEditor, getFrontend, platformUtils} = require("siyuan");
 
   const PREFIX = "enc:v1:";
   const SUPPORTED_TYPES = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"];
@@ -107,6 +107,19 @@ var index = (() => {
     onload() {
       this.contentMenuHandler = this.contentMenuHandler.bind(this);
       this.eventBus.on("open-menu-content", this.contentMenuHandler);
+      // 记住最近一次非折叠选区：移动端点击工具栏可能先清空选区
+      this.lastRange = null;
+      this.rememberSelection = () => {
+        try {
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) {
+            this.lastRange = sel.getRangeAt(0).cloneRange();
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      };
+      document.addEventListener("selectionchange", this.rememberSelection);
       this.addTopBar({
         icon: "iconLock",
         title: "文本加密",
@@ -173,30 +186,32 @@ var index = (() => {
 
     onunload() {
       this.eventBus.off("open-menu-content", this.contentMenuHandler);
+      if (this.rememberSelection) {
+        document.removeEventListener("selectionchange", this.rememberSelection);
+      }
     }
 
     contentMenuHandler({detail}) {
       const {menu, range, protyle} = detail || {};
-      if (!menu || !range || range.collapsed) {
+      if (!menu) {
         return;
       }
-      const selText = range.toString();
-      if (!selText.trim()) {
+      const target = this.resolveMenuTarget(range, protyle);
+      if (!target) {
         return;
       }
-      const hasEncrypted = selText.includes(PREFIX);
       const submenu = [];
-      if (hasEncrypted) {
+      if (target.hasEncrypted) {
         submenu.push({
           icon: "iconUnlock",
           label: "解密查看",
-          click: () => this.decryptSelection(range, protyle),
+          click: () => this.decryptSelection(target.range, protyle),
         });
       } else {
         submenu.push({
           icon: "iconLock",
           label: "设置加密",
-          click: () => this.encryptSelection(range, protyle),
+          click: () => this.encryptSelection(target.range, protyle),
         });
       }
       menu.addItem({
@@ -205,6 +220,69 @@ var index = (() => {
         type: "submenu",
         submenu,
       });
+    }
+
+    // 判断右键菜单应提供加密还是解密：兼容移动端选区文本取不到代码片段的情况
+    resolveMenuTarget(range, protyle) {
+      try {
+        if (range && !range.collapsed) {
+          const selText = String(range.toString());
+          if (selText.includes(PREFIX) || this.rangeHasCipherCode(range)) {
+            return {range, hasEncrypted: true};
+          }
+          const blocks = this.getBlocksInRange(range, protyle);
+          if (blocks.some((b) => (b.text || "").includes(PREFIX))) {
+            return {range, hasEncrypted: true};
+          }
+          if (selText.trim()) {
+            return {range, hasEncrypted: false};
+          }
+        }
+        // 折叠光标 / 无选区：所在块含密文时允许解密整块
+        const block = this.getBlockElementAt(range, protyle);
+        if (block && (this.getBlockText(block) || "").includes(PREFIX)) {
+          const edit = this.getOwnEdit(block);
+          if (edit) {
+            const r = document.createRange();
+            r.selectNodeContents(edit);
+            return {range: r, hasEncrypted: true};
+          }
+        }
+      } catch (e) {
+        console.error("[text-encrypt]", e);
+      }
+      return null;
+    }
+
+    rangeHasCipherCode(range) {
+      try {
+        const frag = range.cloneContents();
+        const codes = frag && frag.querySelectorAll ? Array.from(frag.querySelectorAll('span[data-type="code"]')) : [];
+        return codes.some((c) => (c.textContent || "").includes(PREFIX));
+      } catch (e) {
+        return false;
+      }
+    }
+
+    getBlockElementAt(range, protyle) {
+      let node = range && range.startContainer ? range.startContainer : null;
+      if (!node) {
+        const sel = window.getSelection();
+        node = sel && sel.anchorNode ? sel.anchorNode : null;
+      }
+      if (!node) {
+        return null;
+      }
+      const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+      if (!el || !el.closest) {
+        return null;
+      }
+      const block = el.closest("[data-node-id]");
+      if (!block) {
+        return null;
+      }
+      const root = this.resolveRoot(range, protyle);
+      return root && !root.contains(block) ? null : block;
     }
 
     showTopBarMenu(event) {
@@ -252,10 +330,15 @@ var index = (() => {
 
     getCurrentRange() {
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) {
-        return null;
+      if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) {
+        return sel.getRangeAt(0);
       }
-      return sel.getRangeAt(0);
+      // 移动端点击工具栏后选区可能被清空，回退到最近一次有效选区
+      const last = this.lastRange;
+      if (last && last.startContainer && last.startContainer.isConnected && !last.collapsed) {
+        return typeof last.cloneRange === "function" ? last.cloneRange() : last;
+      }
+      return null;
     }
 
     encryptCurrentSelection() {
@@ -441,23 +524,47 @@ var index = (() => {
     }
 
     copyText(text) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text);
+      // 优先使用思源自带剪贴板：移动端 WebView 不支持 navigator.clipboard
+      try {
+        if (platformUtils) {
+          if (typeof platformUtils.copyPlainText === "function") {
+            return Promise.resolve(platformUtils.copyPlainText(text));
+          }
+          if (typeof platformUtils.writeText === "function") {
+            platformUtils.writeText(text);
+            return Promise.resolve();
+          }
+        }
+      } catch (e) {
+        console.error("[text-encrypt]", e);
       }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).catch(() => this.copyViaExecCommand(text));
+      }
+      return this.copyViaExecCommand(text);
+    }
+
+    copyViaExecCommand(text) {
       return new Promise((resolve, reject) => {
         const ta = document.createElement("textarea");
         ta.value = text;
         ta.style.position = "fixed";
+        ta.style.top = "-1000px";
         ta.style.opacity = "0";
         document.body.appendChild(ta);
+        ta.focus();
         ta.select();
         try {
-          document.execCommand("copy");
-          resolve();
+          if (document.execCommand("copy")) {
+            resolve();
+          } else {
+            reject(new Error("execCommand copy failed"));
+          }
         } catch (e) {
           reject(e);
+        } finally {
+          document.body.removeChild(ta);
         }
-        document.body.removeChild(ta);
       });
     }
 
