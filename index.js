@@ -113,7 +113,62 @@ var index = (() => {
         position: "right",
         callback: (event) => this.showTopBarMenu(event),
       });
+      // 3.8+ 选择工具栏入口（移动端主要入口，避免选中文字后选区丢失）
+      this.hasToolbarApi = false;
+      if (typeof this.addToolbarItem === "function") {
+        try {
+          this.addToolbarItem({
+            name: "text-encrypt",
+            icon: "iconLock",
+            tip: "文本加密",
+            tipPosition: "n",
+            click: (protyle) => this.onToolbarClick(protyle),
+          });
+          this.hasToolbarApi = true;
+        } catch (e) {
+          console.error("[text-encrypt] addToolbarItem failed", e);
+        }
+      }
       console.log("[text-encrypt] loaded");
+    }
+
+    // 旧版本（3.8 之前）回退：把入口加进编辑器工具栏
+    updateProtyleToolbar(toolbar) {
+      if (this.hasToolbarApi) {
+        return toolbar;
+      }
+      toolbar.push({
+        name: "text-encrypt",
+        icon: "iconLock",
+        tip: "文本加密",
+        tipPosition: "n",
+        click: (protyle) => this.onToolbarClick(protyle),
+      });
+      return toolbar;
+    }
+
+    // 选择工具栏按钮：按选区内容自动决定加密还是解密
+    onToolbarClick(ctx) {
+      const range = this.getCurrentRange();
+      if (!range) {
+        showMessage("请先选中要加密或解密的文本", 3000, "error");
+        return;
+      }
+      const protyle = this.getProtyleForRange(range) || this.unwrapProtyle(ctx);
+      const selText = range.toString();
+      if (selText.includes(PREFIX)) {
+        this.decryptSelection(range, protyle);
+      } else {
+        this.encryptSelection(range, protyle);
+      }
+    }
+
+    // 3.8 起插件命令/工具栏回调传入统一执行上下文（含 protyle 字段），这里做兼容解包
+    unwrapProtyle(ctx) {
+      if (ctx && ctx.protyle && ctx.protyle.wysiwyg) {
+        return ctx.protyle;
+      }
+      return ctx;
     }
 
     onunload() {
@@ -178,6 +233,23 @@ var index = (() => {
       return editors && editors.length > 0 ? editors[0] : null;
     }
 
+    // 找到选区所在编辑器（避免取到隐藏页签导致“没有可加密的文本块”）
+    getProtyleForRange(range) {
+      try {
+        const editors = getAllEditor() || [];
+        for (const editor of editors) {
+          const el = editor && editor.wysiwyg && editor.wysiwyg.element;
+          if (el && range && el.contains(range.startContainer)) {
+            return editor;
+          }
+        }
+        return editors.length > 0 ? editors[0] : null;
+      } catch (e) {
+        console.error("[text-encrypt]", e);
+        return null;
+      }
+    }
+
     getCurrentRange() {
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) {
@@ -192,7 +264,7 @@ var index = (() => {
         showMessage("请先选中要加密的文本", 3000, "error");
         return;
       }
-      this.encryptSelection(range, this.getActiveProtyle());
+      this.encryptSelection(range, this.getProtyleForRange(range));
     }
 
     decryptCurrentSelection() {
@@ -201,19 +273,20 @@ var index = (() => {
         showMessage("请先选中要解密的文本", 3000, "error");
         return;
       }
-      this.decryptSelection(range, this.getActiveProtyle());
+      this.decryptSelection(range, this.getProtyleForRange(range));
     }
 
     getWysiwyg(protyle) {
-      if (protyle && protyle.wysiwyg && protyle.wysiwyg.element) {
-        return protyle.wysiwyg.element;
+      const p = this.unwrapProtyle(protyle);
+      if (p && p.wysiwyg && p.wysiwyg.element) {
+        return p.wysiwyg.element;
       }
       return document.querySelector(".protyle-wysiwyg");
     }
 
     getBlocksInRange(range, protyle) {
       const results = [];
-      const root = this.getWysiwyg(protyle);
+      const root = this.resolveRoot(range, protyle);
       if (!root) {
         return results;
       }
@@ -266,6 +339,43 @@ var index = (() => {
       return results;
     }
 
+    // 找到真正包含选区的编辑器根元素（避免命中隐藏页签）
+    resolveRoot(range, protyle) {
+      const p = this.unwrapProtyle(protyle);
+      const fromProtyle = p && p.wysiwyg && p.wysiwyg.element;
+      if (fromProtyle && (!range || fromProtyle.contains(range.startContainer))) {
+        return fromProtyle;
+      }
+      const all = Array.from(document.querySelectorAll(".protyle-wysiwyg"));
+      if (range) {
+        const hit = all.find((el) => el.contains(range.startContainer));
+        if (hit) {
+          return hit;
+        }
+      }
+      return fromProtyle || all[0] || null;
+    }
+
+    // 跨编辑器按块 ID 定位元素
+    findBlockElement(id, protyle) {
+      const p = this.unwrapProtyle(protyle);
+      const preferred = p && p.wysiwyg && p.wysiwyg.element;
+      if (preferred) {
+        const el = preferred.querySelector('div[data-node-id="' + id + '"]');
+        if (el) {
+          return { el, root: preferred };
+        }
+      }
+      const all = Array.from(document.querySelectorAll(".protyle-wysiwyg"));
+      for (const root of all) {
+        const el = root.querySelector('div[data-node-id="' + id + '"]');
+        if (el) {
+          return { el, root };
+        }
+      }
+      return null;
+    }
+
     // 只取块自身的可编辑文本，避免把子块的文字误当成父块文字
     getOwnEdit(el) {
       const edits = el.querySelectorAll('[contenteditable="true"]');
@@ -310,12 +420,20 @@ var index = (() => {
     }
 
     transactionUpdate(protyle, doOperations) {
-      const instance = protyle && protyle.getInstance ? protyle.getInstance() : null;
-      if (!instance || !instance.transaction) {
+      if (!protyle) {
         return false;
       }
-      instance.transaction(doOperations);
-      return true;
+      try {
+        const p = this.unwrapProtyle(protyle);
+        const instance = typeof p.getInstance === "function" ? p.getInstance() : p;
+        if (instance && typeof instance.transaction === "function") {
+          instance.transaction(doOperations);
+          return true;
+        }
+      } catch (e) {
+        console.error("[text-encrypt]", e);
+      }
+      return false;
     }
 
     dialogWidth(mobile, desktop) {
@@ -548,9 +666,9 @@ var index = (() => {
               for (const pair of t.pairs) {
                 newText = newText.split(pair.payload).join(pair.plain);
               }
-              const root = this.getWysiwyg(protyle);
-              const el = root ? root.querySelector('div[data-node-id="' + t.id + '"]') : null;
-              if (el) {
+              const found = this.findBlockElement(t.id, protyle);
+              if (found) {
+                const el = found.el;
                 const edit = this.getOwnEdit(el);
                 if (edit) {
                   edit.textContent = newText;
@@ -564,9 +682,10 @@ var index = (() => {
             const attrRemoves = [];
             for (const t of restored) {
               attrRemoves.push(t.id);
-              const root = this.getWysiwyg(protyle);
-              const el = root ? root.querySelector('div[data-node-id="' + t.id + '"]') : null;
-              if (el) {
+              const found = this.findBlockElement(t.id, protyle);
+              if (found) {
+                const el = found.el;
+                const root = found.root;
                 let p = el.parentElement;
                 while (p && p !== root) {
                   if (p.dataset && p.dataset.nodeId && p.hasAttribute(ENCRYPTED_ATTR)) {

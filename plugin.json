@@ -2,7 +2,7 @@
   "name": "siyuan-plugin-text-encrypt",
   "author": "YOGEMOW",
   "url": "https://github.com/YOGEMOW/siyuan-plugin-text-encrypt",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "3.0.0",
   "kernels": [
     "all"
