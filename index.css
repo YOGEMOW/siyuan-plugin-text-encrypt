@@ -41,3 +41,19 @@
     margin: 0;
   }
 }
+
+/* 移动端键盘适配：键盘弹出时弹窗顶部对齐，避免输入框被遮挡 */
+@media (max-width: 768px) {
+  .text-encrypt-dialog--keyboard > .b3-dialog {
+    align-items: flex-start;
+  }
+  .b3-dialog__container.text-encrypt-panel {
+    transition: none;
+  }
+  .text-encrypt-panel .b3-dialog__content {
+    overflow: auto;
+  }
+  .text-encrypt-panel .b3-text-field {
+    font-size: 16px; /* 防止 iOS 聚焦输入框时自动放大页面 */
+  }
+}

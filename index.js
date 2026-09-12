@@ -523,6 +523,94 @@ var index = (() => {
       return isMobile() ? mobile : desktop;
     }
 
+    // 移动端键盘适配：键盘弹出时把弹窗顶到可视区域内并限制高度
+    assistKeyboard(dialog) {
+      if (!isMobile() || !dialog || !dialog.element) {
+        return;
+      }
+      const root = dialog.element;
+      const panel = root.querySelector(".b3-dialog__container");
+      if (!panel) {
+        return;
+      }
+      const adjust = () => {
+        try {
+          const vv = window.visualViewport;
+          const visible = vv ? vv.height : window.innerHeight;
+          const top = vv ? vv.offsetTop : 0;
+          const active = document.activeElement;
+          const editing = !!active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+          root.classList.toggle("text-encrypt-dialog--keyboard", editing);
+          panel.style.maxHeight = Math.max(240, visible - 24) + "px";
+          panel.style.marginTop = editing ? top + 8 + "px" : "";
+        } catch (e) {
+          console.error("[text-encrypt]", e);
+        }
+      };
+      const onFocusIn = () => setTimeout(adjust, 260);
+      const onFocusOut = () => setTimeout(adjust, 60);
+      const onResize = () => adjust();
+      root.addEventListener("focusin", onFocusIn);
+      root.addEventListener("focusout", onFocusOut);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", onResize);
+        window.visualViewport.addEventListener("scroll", onResize);
+      }
+      adjust();
+      const origDestroy = dialog.destroy.bind(dialog);
+      dialog.destroy = (...args) => {
+        root.removeEventListener("focusin", onFocusIn);
+        root.removeEventListener("focusout", onFocusOut);
+        if (window.visualViewport) {
+          window.visualViewport.removeEventListener("resize", onResize);
+          window.visualViewport.removeEventListener("scroll", onResize);
+        }
+        return origDestroy(...args);
+      };
+    }
+
+    // 移动端自动聚焦可能失败，延迟 + 失焦编辑器后重试；点击弹窗空白处也可唤起键盘
+    focusInput(input) {
+      if (!input) {
+        return;
+      }
+      const doFocus = () => {
+        try {
+          const active = document.activeElement;
+          if (isMobile() && active && active !== input && typeof active.blur === "function") {
+            active.blur();
+          }
+          input.focus();
+        } catch (e) {
+          console.error("[text-encrypt]", e);
+        }
+      };
+      if (isMobile()) {
+        setTimeout(doFocus, 280);
+      } else {
+        doFocus();
+      }
+    }
+
+    bindDialogTapFocus(dialog, inputs) {
+      if (!isMobile() || !dialog || !dialog.element) {
+        return;
+      }
+      const body = dialog.element.querySelector(".b3-dialog__content") || dialog.element;
+      body.addEventListener("click", (e) => {
+        const t = e.target;
+        if (!t) {
+          return;
+        }
+        const tag = t.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || (t.closest && t.closest("button"))) {
+          return;
+        }
+        const target = inputs.find((i) => i && !i.value) || inputs[0];
+        this.focusInput(target);
+      });
+    }
+
     copyText(text) {
       // 优先使用思源自带剪贴板：移动端 WebView 不支持 navigator.clipboard
       try {
@@ -579,8 +667,8 @@ var index = (() => {
         title: "设置加密",
         content: `<div class="b3-dialog__content">
   <div class="b3-typography" style="margin-bottom:12px;">将为选中内容设置加密密码，共涉及 ${blocks.length} 个块。<br>请牢记密码，忘记后无法找回。</div>
-  <input class="b3-text-field fn__block" id="encPwd1" type="password" placeholder="请输入加密密码">
-  <input class="b3-text-field fn__block" id="encPwd2" type="password" placeholder="请再次输入密码" style="margin-top:8px;">
+  <input class="b3-text-field fn__block" id="encPwd1" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="请输入加密密码">
+  <input class="b3-text-field fn__block" id="encPwd2" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="请再次输入密码" style="margin-top:8px;">
 </div>
 <div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="encCancel">取消</button>
@@ -588,12 +676,15 @@ var index = (() => {
   <button class="b3-button b3-button--text" id="encOk">加密</button>
 </div>`,
         width: this.dialogWidth("92vw", "480px"),
+        containerClassName: "text-encrypt-panel",
       });
 
       const input1 = dialog.element.querySelector("#encPwd1");
       const input2 = dialog.element.querySelector("#encPwd2");
       const okBtn = dialog.element.querySelector("#encOk");
       const cancelBtn = dialog.element.querySelector("#encCancel");
+      this.assistKeyboard(dialog);
+      this.bindDialogTapFocus(dialog, [input1, input2]);
 
       cancelBtn.addEventListener("click", () => dialog.destroy());
       okBtn.addEventListener("click", async () => {
@@ -630,7 +721,7 @@ var index = (() => {
         }
       });
       dialog.bindInput(input2, () => okBtn.click());
-      input1.focus();
+      this.focusInput(input1);
     }
 
     async encryptOneBlock(blockInfo, password, protyle) {
@@ -691,7 +782,7 @@ var index = (() => {
         title: "解密查看",
         content: `<div class="b3-dialog__content">
   <div class="b3-typography" style="margin-bottom:12px;">输入加密时设置的密码以查看明文。</div>
-  <input class="b3-text-field fn__block" id="decPwd" type="password" placeholder="请输入加密密码">
+  <input class="b3-text-field fn__block" id="decPwd" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="请输入加密密码">
 </div>
 <div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="decCancel">取消</button>
@@ -699,11 +790,14 @@ var index = (() => {
   <button class="b3-button b3-button--text" id="decOk">查看</button>
 </div>`,
         width: this.dialogWidth("92vw", "480px"),
+        containerClassName: "text-encrypt-panel",
       });
 
       const pwdInput = dialog.element.querySelector("#decPwd");
       const okBtn = dialog.element.querySelector("#decOk");
       const cancelBtn = dialog.element.querySelector("#decCancel");
+      this.assistKeyboard(dialog);
+      this.bindDialogTapFocus(dialog, [pwdInput]);
 
       cancelBtn.addEventListener("click", () => dialog.destroy());
       okBtn.addEventListener("click", async () => {
@@ -737,7 +831,7 @@ var index = (() => {
         this.showPlainDialog(restored, plainParts.join("\n\n"), protyle);
       });
       dialog.bindInput(pwdInput, () => okBtn.click());
-      pwdInput.focus();
+      this.focusInput(pwdInput);
     }
 
     showPlainDialog(restored, plain, protyle) {
@@ -754,7 +848,9 @@ var index = (() => {
   <button class="b3-button b3-button--text" id="decRestore">解密并恢复为明文（移除加密）</button>
 </div>`,
         width: this.dialogWidth("92vw", "640px"),
+        containerClassName: "text-encrypt-panel",
       });
+      this.assistKeyboard(resultDialog);
 
       resultDialog.element.querySelector("#decClose").addEventListener("click", () => resultDialog.destroy());
       resultDialog.element.querySelector("#decCopy").addEventListener("click", () => {
