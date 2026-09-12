@@ -532,6 +532,26 @@ var index = (() => {
       return isMobile() ? mobile : desktop;
     }
 
+    // 移动端改用普通输入框 + 掩码：MIUI 等系统的"安全键盘"会与思源编辑栏冲突，导致键盘弹不出来
+    useMaskedInput() {
+      if (!isMobile()) {
+        return false;
+      }
+      try {
+        return typeof CSS !== "undefined" && !!CSS.supports && CSS.supports("-webkit-text-security", "disc");
+      } catch (e) {
+        return false;
+      }
+    }
+
+    pwdField(id, placeholder, extraStyle) {
+      const masked = this.useMaskedInput();
+      const cls = masked ? "b3-text-field fn__block text-encrypt-masked" : "b3-text-field fn__block";
+      const type = masked ? "text" : "password";
+      const style = extraStyle ? ' style="' + extraStyle + '"' : "";
+      return '<input class="' + cls + '" id="' + id + '" type="' + type + '" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="' + placeholder + '"' + style + ">";
+    }
+
     // 移动端键盘适配：键盘弹出时把弹窗顶到可视区域内并限制高度
     assistKeyboard(dialog) {
       if (!isMobile() || !dialog || !dialog.element) {
@@ -728,8 +748,9 @@ var index = (() => {
         title: "设置加密",
         content: `<div class="b3-dialog__content">
   <div class="b3-typography" style="margin-bottom:12px;">将为选中内容设置加密密码，共涉及 ${blocks.length} 个块。<br>请牢记密码，忘记后无法找回。</div>
-  <input class="b3-text-field fn__block" id="encPwd1" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="请输入加密密码">
-  <input class="b3-text-field fn__block" id="encPwd2" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="请再次输入密码" style="margin-top:8px;">
+  ${this.pwdField("encPwd1", "请输入加密密码")}
+  ${this.pwdField("encPwd2", "请再次输入密码", "margin-top:8px;")}
+  ${isMobile() ? '<div class="b3-typography" style="margin-top:8px;font-size:12px;opacity:.7;">若键盘未弹出，点一下输入框即可。</div>' : ""}
 </div>
 <div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="encCancel">取消</button>
@@ -849,7 +870,8 @@ var index = (() => {
         title: "解密查看",
         content: `<div class="b3-dialog__content">
   <div class="b3-typography" style="margin-bottom:12px;">输入加密时设置的密码以查看明文。</div>
-  <input class="b3-text-field fn__block" id="decPwd" type="password" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="请输入加密密码">
+  ${this.pwdField("decPwd", "请输入加密密码")}
+  ${isMobile() ? '<div class="b3-typography" style="margin-top:8px;font-size:12px;opacity:.7;">若键盘未弹出，点一下输入框即可。</div>' : ""}
 </div>
 <div class="b3-dialog__action text-encrypt-actions">
   <button class="b3-button b3-button--cancel" id="decCancel">取消</button>

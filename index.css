@@ -44,6 +44,11 @@
 
 /* 移动端键盘适配：键盘弹出时弹窗顶部对齐，避免输入框被遮挡 */
 @media (max-width: 768px) {
+  /* 普通输入框 + 掩码显示：避免 MIUI 等系统安全键盘与编辑栏冲突 */
+  .text-encrypt-masked {
+    -webkit-text-security: disc;
+    letter-spacing: 2px;
+  }
   .text-encrypt-dialog--keyboard > .b3-dialog {
     align-items: flex-start;
   }
