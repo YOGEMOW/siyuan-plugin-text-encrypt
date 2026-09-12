@@ -43,6 +43,11 @@
 }
 
 /* 移动端键盘适配：键盘弹出时弹窗顶部对齐，避免输入框被遮挡 */
+/* 密码弹窗打开期间隐藏编辑器排版工具栏（输入密码时用不到，避免抢屏闪烁） */
+#keyboardToolbar.text-encrypt-hide-bar {
+  display: none !important;
+}
+
 @media (max-width: 768px) {
   /* 普通输入框 + 掩码显示：避免 MIUI 等系统安全键盘与编辑栏冲突 */
   .text-encrypt-masked {

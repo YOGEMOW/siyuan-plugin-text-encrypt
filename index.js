@@ -579,6 +579,18 @@ var index = (() => {
       const onFocusIn = () => setTimeout(adjust, 260);
       const onFocusOut = () => setTimeout(adjust, 60);
       const onResize = () => adjust();
+      // 输入密码时不需要编辑器排版工具栏，固定隐藏避免它与键盘/弹窗抢屏
+      const hideEditingBar = () => {
+        try {
+          const bar = document.getElementById("keyboardToolbar");
+          if (bar) {
+            bar.classList.add("text-encrypt-hide-bar");
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      };
+      hideEditingBar();
       root.addEventListener("focusin", onFocusIn);
       root.addEventListener("focusout", onFocusOut);
       if (window.visualViewport) {
@@ -593,6 +605,15 @@ var index = (() => {
         if (window.visualViewport) {
           window.visualViewport.removeEventListener("resize", onResize);
           window.visualViewport.removeEventListener("scroll", onResize);
+        }
+        try {
+          const bar = document.getElementById("keyboardToolbar");
+          if (bar) {
+            // 弹窗关闭后把工具栏显示还给思源自己控制
+            bar.classList.remove("text-encrypt-hide-bar");
+          }
+        } catch (e) {
+          /* ignore */
         }
         return origDestroy(...args);
       };
