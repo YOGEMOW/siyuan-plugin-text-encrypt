@@ -107,6 +107,14 @@ var index = (() => {
     onload() {
       this.contentMenuHandler = this.contentMenuHandler.bind(this);
       this.eventBus.on("open-menu-content", this.contentMenuHandler);
+      // 文档加载时自动补回丢失的加密标注（兼容旧版本加密、或事务覆盖属性后的块）
+      this.repairHandler = (event) => {
+        const protyle = event && event.detail ? event.detail.protyle : null;
+        this.repairAnnotations(protyle);
+      };
+      this.eventBus.on("loaded-protyle-dynamic", this.repairHandler);
+      this.eventBus.on("loaded-protyle-static", this.repairHandler);
+      this.eventBus.on("switch-protyle", this.repairHandler);
       // 记住最近一次非折叠选区：移动端点击工具栏可能先清空选区
       this.lastRange = null;
       this.rememberSelection = () => {
@@ -186,8 +194,55 @@ var index = (() => {
 
     onunload() {
       this.eventBus.off("open-menu-content", this.contentMenuHandler);
+      if (this.repairHandler) {
+        this.eventBus.off("loaded-protyle-dynamic", this.repairHandler);
+        this.eventBus.off("loaded-protyle-static", this.repairHandler);
+        this.eventBus.off("switch-protyle", this.repairHandler);
+      }
       if (this.rememberSelection) {
         document.removeEventListener("selectionchange", this.rememberSelection);
+      }
+    }
+
+    // 扫描含密文但缺少 custom-encrypted 属性的块，自动补回标注
+    async repairAnnotations(protyle) {
+      try {
+        const root = this.getWysiwyg(protyle);
+        if (!root) {
+          return;
+        }
+        const now = Date.now();
+        this.repairTimes = this.repairTimes || new WeakMap();
+        const last = this.repairTimes.get(root) || 0;
+        if (now - last < 1500) {
+          return;
+        }
+        this.repairTimes.set(root, now);
+        const els = Array.from(root.querySelectorAll("[data-node-id]"));
+        let fixed = 0;
+        for (const el of els) {
+          if (el.hasAttribute(ENCRYPTED_ATTR)) {
+            continue;
+          }
+          const text = this.getBlockText(el);
+          if (!text || !text.includes(PREFIX)) {
+            continue;
+          }
+          if (extractPayloads(text).length === 0) {
+            continue;
+          }
+          try {
+            await setBlockAttr(el.dataset.nodeId, ENCRYPTED_ATTR, ENCRYPTED_VALUE);
+            fixed++;
+          } catch (e) {
+            console.error("[text-encrypt]", e);
+          }
+        }
+        if (fixed > 0) {
+          console.log("[text-encrypt] repaired " + fixed + " annotation(s)");
+        }
+      } catch (e) {
+        console.error("[text-encrypt]", e);
       }
     }
 
@@ -855,6 +910,7 @@ var index = (() => {
         return "no-editable";
       }
       const originalHTML = edit.innerHTML;
+      const originalAttr = element.getAttribute(ENCRYPTED_ATTR);
       if (full) {
         edit.textContent = ct;
       } else {
@@ -862,9 +918,17 @@ var index = (() => {
         const after = escapeHtml(text.slice(idx + textToEncrypt.length));
         edit.innerHTML = before + '<span data-type="code">' + escapeHtml(ct) + '</span>' + after;
       }
+      // 先写入块属性，让属性随"更新块内容"的事务一起保存
+      // （3.8.10 起事务晚于单独写属性落地，会覆盖掉后写的属性）
+      element.setAttribute(ENCRYPTED_ATTR, ENCRYPTED_VALUE);
       if (!this.transactionUpdate(protyle, [{action: "update", id, data: element.outerHTML}])) {
         // 保存失败时回滚界面，避免出现"看起来加密了但其实没保存"的情况
         edit.innerHTML = originalHTML;
+        if (originalAttr === null) {
+          element.removeAttribute(ENCRYPTED_ATTR);
+        } else {
+          element.setAttribute(ENCRYPTED_ATTR, originalAttr);
+        }
         showMessage("保存失败：未找到编辑器上下文，请重试", 4000, "error");
         return "no-protyle";
       }
@@ -986,6 +1050,8 @@ var index = (() => {
                 const edit = this.getOwnEdit(el);
                 if (edit) {
                   edit.textContent = newText;
+                  // 先移除块属性，让"更新块内容"的事务一并删除标注
+                  el.removeAttribute(ENCRYPTED_ATTR);
                   ops.push({action: "update", id: t.id, data: el.outerHTML});
                 }
               }
